@@ -1,0 +1,20 @@
+python3 -c "
+import re
+content = open('foe/static/index.html').read()
+assert content.strip().endswith('</html>'), 'File must end with </html>'
+assert '<!DOCTYPE html>' in content, 'Must have doctype'
+assert '</script>' in content, 'Must have closed script tag'
+assert '</body>' in content, 'Must have closed body'
+assert 'pub-btn-' in content, 'Must have publish button'
+assert 'disabled' in content, 'Must have disabled state logic'
+assert 'publish' in content.lower(), 'Must reference publish'
+assert '/api/projects/' in content and 'publish' in content, 'Must call publish endpoint'
+assert '409' in content, 'Must handle 409 conflict'
+assert 'repo_url' in content or 'publish_url' in content, 'Must display repo URL'
+assert 'pages' in content.lower(), 'Must display Pages URL'
+assert \"status !== 'done'\" in content or 'status !== \"done\"' in content or '!== \\'done\\'' in content, 'Must check done status'
+assert 'API_BASE' in content, 'Must define API_BASE'
+assert \"window.location.protocol === 'file:'\" in content, 'Must check file protocol'
+assert 'http://127.0.0.1:19093' in content, 'Must have file:// fallback'
+print('ALL CHECKS PASSED')
+"

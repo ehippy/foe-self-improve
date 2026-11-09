@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>foe dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:system-ui,-apple-system,sans-serif;background:#0f1117;color:#e2e8f0;padding:1rem}
+h1{font-size:1.4rem;margin-bottom:1rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:1rem}
+.card{background:#1e293b;border-radius:8px;padding:1rem;border:1px solid #334155}
+.card h2{font-size:1.1rem;margin-bottom:.4rem}
+.card .meta{font-size:.8rem;color:#94a3b8;margin-bottom:.6rem}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.75rem;font-weight:600;margin-right:.4rem}
+.status-done{background:#166534;color:#bbf7d0}
+.status-running{background:#1e3a5f;color:#93c5fd}
+.status-stopped{background:#374151;color:#d1d5db}
+.status-error{background:#7f1d1d;color:#fecaca}
+.qa-pass{background:#166534;color:#bbf7d0}
+.qa-fail{background:#7f1d1d;color:#fecaca}
+.qa-pending{background:#374151;color:#d1d5db}
+.qa-report{margin-top:.5rem;padding:.5rem;background:#1a1a2e;border-radius:4px;font-size:.78rem}
+.qa-report h4{margin-bottom:.3rem;color:#fca5a5}
+.qa-report ul{margin:0;padding-left:1.2rem}
+.qa-report li{margin-bottom:.2rem;color:#fca5a5}
+.btn{padding:.4rem .8rem;border:none;border-radius:4px;cursor:pointer;font-size:.8rem;font-weight:500}
+.btn-publish{background:#2563eb;color:#fff}
+.btn-publish:disabled{background:#4b5563;cursor:not-allowed;opacity:.6}
+.btn-qa{background:#7c3aed;color:#fff;margin-left:.3rem}
+.btn-start{background:#16a34a;color:#fff}
+.btn-stop{background:#dc2626;color:#fff}
+.btn-sm{padding:.25rem .5rem;font-size:.72rem}
+.url-box{margin-top:.5rem;font-size:.75rem;word-break:break-all}
+.url-box a{color:#60a5fa;text-decoration:none}
+.url-box a:hover{text-decoration:underline}
+.form{margin-bottom:1rem}
+.form label{display:block;font-size:.8rem;margin-bottom:.2rem;color:#94a3b8}
+.form input,.form textarea{width:100%;padding:.4rem;background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;font-size:.85rem}
+.form textarea{height:60px;resize:vertical}
+.form-row{display:flex;gap:.5rem;margin-bottom:.5rem}
+.form-row input{flex:1}
+</style>
+</head>
+<body>
+<h1>foe dashboard</h1>
+<div class="form">
+  <div class="form-row">
+    <input id="f-name" placeholder="Project name">
+    <input id="f-goal" placeholder="Goal">
+  </div>
+  <div class="form-row">
+    <input id="f-pm" placeholder="PM model (optional)">
+    <input id="f-dev" placeholder="Dev model (optional)">
+    <input id="f-max" type="number" value="10" min="1" max="100" style="width:60px">
+  </div>
+  <button class="btn btn-start" onclick="createProject()">Create &amp; Start</button>
+</div>
+<div class="grid" id="projects"></div>
+
+<script>
+const API_BASE = (window.location.protocol === 'file:') ? 'http://127.0.0.1:19093' : '';
+
+async function api(path, opts) {
+  const res = await fetch(API_BASE + path, opts);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || res.statusText);
+  }
+  return res.json();
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function statusClass(st) {
+  const map = { done: 'status-done', running: 'status-running', stopped: 'status-stopped', error: 'status-error' };
+  return map[st] || 'status-stopped';
+}
+
+function qaBadgeHTML(project) {
+  const st = project.qa_status || 'pending';
+  const cls = st === 'pass' ? 'qa-pass' : st === 'fail' ? 'qa-fail' : 'qa-pending';
+  const label = st === 'pass' ? 'QA PASS' : st === 'fail' ? 'QA FAIL' : 'QA PENDING';
+  let html = '<span class="badge ' + cls + '">' + label + '</span>';
+  if (st === 'fail' && project.qa_report && project.qa_report.length) {
+    html += '<div class="qa-report"><h4>QA Failures</h4><ul>';
+    for (const f of project.qa_report) {
+      html += '<li>' + esc(f) + '</li>';
+    }
+    html += '</ul></div>';
+  }
+  return html;
+}
+
+function renderCard(p) {
+  const done = p.status === 'done';
+  const pubDisabled = !done;
+  const pubTitle = pubDisabled ? 'Publish only available when status is done' : 'Publish to GitHub';
+  let urlHtml = '';
+  if (p.publish_url) {
+    urlHtml += '<div class="url-box">Repo: <a href="' + esc(p.publish_url) + '" target="_blank">' + esc(p.publish_url) + '</a></div>';
+  }
+  if (p.pages_url) {
+    urlHtml += '<div class="url-box">Pages: <a href="' + esc(p.pages_url) + '" target="_blank">' + esc(p.pages_url) + '</a></div>';
+  }
+  const btns = [];
+  if (p.status === 'stopped' || p.status === 'error') {
+    btns.push('<button class="btn btn-start btn-sm" onclick="startProject(' + p.id + ')">Start</button>');
+  }
+  if (p.status === 'running') {
+    btns.push('<button class="btn btn-stop btn-sm" onclick="stopProject(' + p.id + ')">Stop</button>');
+  }
+  btns.push('<button id="pub-btn-' + p.id + '" class="btn btn-publish btn-sm" ' + (pubDisabled ? 'disabled' : '') + ' title="' + pubTitle + '" onclick="publishProject(' + p.id + ')">Publish</button>');
+  btns.push('<button class="btn btn-qa btn-sm" onclick="runQA(' + p.id + ')">QA</button>');
+
+  return '<div class="card" id="card-' + p.id + '">' +
+    '<h2>' + esc(p.name) + '</h2>' +
+    '<div class="meta">' +
+      '<span class="badge ' + statusClass(p.status) + '">' + esc(p.status) + '</span>' +
+      qaBadgeHTML(p) +
+    '</div>' +
+    '<div class="meta">' + esc(p.goal) + ' | iter ' + (p.iterations || 0) + '/' + (p.max_iterations || 10) + '</div>' +
+    '<div>' + btns.join(' ') + '</div>' +
+    urlHtml +
+    (p.error_message ? '<div class="url-box" style="color:#fca5a5">' + esc(p.error_message) + '</div>' : '') +
+    '</div>';
+}
+
+async function loadProjects() {
+  const data = await api('/api/projects');
+  const grid = document.getElementById('projects');
+  grid.innerHTML = data.map(renderCard).join('');
+}
+
+async function createProject() {
+  const name = document.getElementById('f-name').value.trim();
+  const goal = document.getElementById('f-goal').value.trim();
+  if (!name || !goal) return alert('Name and goal required');
+  await api('/api/projects', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name, goal,
+      pm_model: document.getElementById('f-pm').value.trim(),
+      dev_model: document.getElementById('f-dev').value.trim(),
+      max_iterations: parseInt(document.getElementById('f-max').value) || 10,
+      start: true
+    })
+  });
+  document.getElementById('f-name').value = '';
+  document.getElementById('f-goal').value = '';
+  loadProjects();
+}
+
+async function startProject(id) {
+  await api('/api/projects/' + id + '/start', { method: 'POST' });
+  loadProjects();
+}
+
+async function stopProject(id) {
+  await api('/api/projects/' + id + '/stop', { method: 'POST' });
+  loadProjects();
+}
+
+async function publishProject(id) {
+  try {
+    await api('/api/projects/' + id + '/publish', { method: 'POST' });
+    loadProjects();
+  } catch (e) {
+    if (e.message && e.message.includes('409')) {
+      alert('Conflict: project may already be published or not in done status.');
+    } else {
+      alert('Publish failed: ' + e.message);
+    }
+  }
+}
+
+async function runQA(id) {
+  try {
+    await api('/api/projects/' + id + '/qa', { method: 'POST' });
+    loadProjects();
+  } catch (e) {
+    alert('QA failed: ' + e.message);
+  }
+}
+
+loadProjects();
+setInterval(loadProjects, 5000);
+</script>
+</body>
+</html>
